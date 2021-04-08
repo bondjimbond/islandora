@@ -163,12 +163,17 @@ function islandora_get_orphaned_objects() {
     $member_field = variable_get('islandora_solr_member_of_field', 'RELS_EXT_isMemberOf_uri_ms');
 
     $params = "PID, " . $label_field . ", " . $collection_field . ", " . $member_field;
+    $query_start = 0;
+    $solr_limit = 5;
+// Change the above to 1000 when done testing!!
+
 
     $query = "PID:*";
     $qp = new islandoraSolrQueryProcessor();
     $qp->buildQuery($query);
     $qp->solrParams['fl'] = $params;
-    $qp->solrLimit = 1000000000;
+    $qp->solrParams['start'] = $query_start;
+    $qp->solrLimit = $solr_limit;
 
     // Check islandora_compound_object filters to include compound children.
     if (variable_get('islandora_compound_object_hide_child_objects_solr', TRUE)) {
@@ -183,14 +188,23 @@ function islandora_get_orphaned_objects() {
       }
     }
     $qp->executeQuery(FALSE);
-
+    $total_results = $qp->islandoraSolrResult['response']['numFound'];
+    $results = array();
     try {
-      $results = $qp->islandoraSolrResult['response']['objects'];
+      $results[] = $qp->islandoraSolrResult['response']['objects'];
     }
     catch (Exception $e) {
       watchdog_exception('Islandora', $e, 'Got an exception searching for parent objects .', array(), WATCHDOG_ERROR);
       $results = array();
     }
+  dd($results);
+
+// Set page limit.
+  $limit = 200;
+  $pager_element = 0;
+  $passed_page = pager_find_page($pager_element);
+ 
+
     $orphaned_objects = array();
     $already_checked = array();
     $missing_parents = array();
@@ -318,6 +332,100 @@ function islandora_delete_orphaned_objects_create_batch(array $pids) {
     'file' => drupal_get_path('module', 'islandora') . '/includes/orphaned_objects.inc',
   );
   return $batch;
+}
+
+/**
+ * Constructs the batch that will go out and delete objects.
+ *
+ * @param array $pids
+ *   The array of pids to be deleted.
+ *
+ * @return array
+ *   An array detailing the batch that is about to be run.
+ */
+function islandora_searchsolr_orphaned_objects_create_batch() {
+  // Set up a batch operation.
+  // Change 1000 to any number you prefer @bondjimbond
+  $batch = array(
+    'operations' => array(
+      array('islandora_searchsolr_orphaned_objects_batch_operation', 1000),
+    ),
+    'title' => t('Searching for Orphaned Objects...'),
+    'init_message' => t('Preparing to search Orphaned Objects.'),
+    'progress_message' => t('Time elapsed: @elapsed <br/>Estimated time remaining @estimate.'),
+    'error_message' => t('An error has occurred.'),
+    'finished' => 'islandora_searchsolr_orphaned_objects_batch_finished',
+    'file' => drupal_get_path('module', 'islandora') . '/includes/orphaned_objects.inc',
+  );
+  return $batch;
+}
+
+/**
+ * Constructs and performs the deleting batch operation.
+ *
+ * @param array $pids
+ *   An array of pids to be deleted.
+ * @param array $context
+ *   The context of the Drupal batch.
+ */
+function islandora_searchsolr_orphaned_objects_batch_operation($maxfacets = 1000, array &$context) {
+  if (empty($context['sandbox'])) {
+    // First pass:
+    // WE need to total objects the server has
+    $islandora_solr_result = islandora_get_orphaned_parent_objects_solr(0,0);
+    $document_count = (int) $islandora_solr_result['response']['numFound'];
+    $context['sandbox'] = array();
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['orphaned'] = array();
+    $context['sandbox']['missing'] = array();
+    $context['sandbox']['max'] = $document_count;
+    $context['results']['success'] = array();
+  }
+  if (!empty($context['sandbox']['max'])) {
+    // @ASK: do not know if offset is inclussive or not? so +1 or just like that?
+    $facet_offset = $context['sandbox']['progress'] * $maxfacets;
+    $islandora_solr_result = islandora_get_orphaned_parent_objects_solr($facet_offset, $maxfacets);
+    $facets = $islandora_solr_result->facetFieldArray;
+    $missing = FALSE;
+    $facet_count = 0;
+    foreach($facets as $facet_key => $FEDORA_PIDS) {
+      $facet_count = $facet_count + count($FEDORA_PIDS);
+      foreach ($FEDORA_PIDS as $FEDORA_PID) {
+        if (!islandora_check_missing_parent_objects_solr($FEDORA_PID)) {
+          $missing = TRUE;
+          $context['sandbox']['missing'][$FEDORA_PID] = $FEDORA_PID;
+          // Missing found. HERE we need to fetch now the Orphan Objects using that PID
+          // PLEASE ADD THAT METHOD. YOU ALREADY KNOW HOW @bondjimbond, should return into
+          // $orphaned a list document list from Solr;
+          $orphaned = [];
+          foreach ($orphaned as $record) {
+            $context['sandbox']['orphaned'][$record['PID']] = $record;
+          }
+        }
+      }
+    }
+    if ($missing) {
+      $context['message'] = t('Collecting found Missing parents (@current of @total)...', array(
+        '@current' => $context['sandbox']['progress'],
+        '@total' => $context['sandbox']['total'],
+      ));
+    } else {
+      $context['message'] = t('No missing parents on this pass (@current of @total)...', array(
+        '@current' => $context['sandbox']['progress'],
+        '@total' => $context['sandbox']['total'],
+      ));
+    }
+    $context['sandbox']['max'] =  $context['sandbox']['max']  - $facet_offset;
+
+    $context['sandbox']['progress']++;
+  }
+  // If we run out of facet results means the batch is done.
+  if ($facet_count == 0) {
+    $context['finished'] = 1;
+  }
+  else {
+ $context['finished'] = ($context['sandbox']['max'] == 0) ? 1 : ($context['sandbox']['progress'] * $maxfacets / $context['sandbox']['max']);
+  }
 }
 
 /**
