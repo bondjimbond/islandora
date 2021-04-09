@@ -164,7 +164,7 @@ function islandora_get_orphaned_objects() {
 
     $params = "PID, " . $label_field . ", " . $collection_field . ", " . $member_field;
     $query_start = 0;
-    $solr_limit = 5;
+    $solr_limit = 1000;
 // Change the above to 1000 when done testing!!
 
 
@@ -187,17 +187,26 @@ function islandora_get_orphaned_objects() {
         }
       }
     }
+
+    $start_point = 0;
     $qp->executeQuery(FALSE);
     $total_results = $qp->islandoraSolrResult['response']['numFound'];
     $results = array();
+    $all_results = array();
+while ($start_point <= $total_results) {
+    $qp->executeQuery(FALSE);
     try {
-      $results[] = $qp->islandoraSolrResult['response']['objects'];
+      $results = $qp->islandoraSolrResult['response']['objects'];
+      $all_results = array_merge($all_results, $results);
     }
     catch (Exception $e) {
       watchdog_exception('Islandora', $e, 'Got an exception searching for parent objects .', array(), WATCHDOG_ERROR);
       $results = array();
     }
-  dd($results);
+  $start_point = $start_point + $solr_limit;
+}
+
+dd($all_results);
 
 // Set page limit.
   $limit = 200;
@@ -209,7 +218,7 @@ function islandora_get_orphaned_objects() {
     $already_checked = array();
     $missing_parents = array();
     // Check all results for PIDs that don't exist.
-    foreach ($results as $result) {
+    foreach ($all_results as $result) {
       if (array_key_exists($collection_field, $result['solr_doc'])) {
         foreach ($result['solr_doc'][$collection_field] as $collection) {
           if (($result['PID'] != $root_pid) && ($collection != $root_pid_check)) {
