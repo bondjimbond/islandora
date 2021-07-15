@@ -191,6 +191,11 @@ function islandora_get_orphaned_objects() {
       watchdog_exception('Islandora', $e, 'Got an exception searching for parent objects .', array(), WATCHDOG_ERROR);
       $results = array();
     }
+
+    $results_pids_only = array();
+    foreach($results as $result) {
+      $results_pids_only[] = $result['PID'];
+    }
     $orphaned_objects = array();
     $already_checked = array();
     $missing_parents = array();
@@ -203,7 +208,7 @@ function islandora_get_orphaned_objects() {
               $orphaned_objects[] = $result;
             }
             elseif (!in_array($collection, $already_checked)) {
-              $test = islandora_identify_missing_parents($collection);
+              $test = islandora_identify_missing_parents($results_pids_only, $collection);
               if (!$test) {
                 $orphaned_objects[] = $result;
                 $missing_parents[] = $collection;
@@ -219,7 +224,7 @@ function islandora_get_orphaned_objects() {
             $orphaned_objects[] = $result;
           }
           elseif (!in_array($membership, $already_checked)) {
-            $test = islandora_identify_missing_parents($membership);
+            $test = islandora_identify_missing_parents($results_pids_only, $membership);
             if (!$test) {
               $orphaned_objects[] = $result;
               $missing_parents[] = $membership;
@@ -323,21 +328,13 @@ function islandora_delete_orphaned_objects_create_batch(array $pids) {
 /**
  * Solr query to check for deceased parents.
  */
-function islandora_identify_missing_parents($parent) {
-  $parent_params = "PID";
+function islandora_identify_missing_parents($original_results, $parent) {
   $parent_test = substr($parent, strpos($parent, '/') + 1);
-  $parent_query = 'PID:"' . $parent_test . '"';
-  $qp = new islandoraSolrQueryProcessor();
-  $qp->buildQuery($parent_query);
-  $qp->solrParams['fl'] = $parent_params;
-  $qp->solrLimit = 1000000000;
-  $qp->executeQuery(FALSE);
-  try {
-    $parent_results = $qp->islandoraSolrResult['response']['objects'];
+  if (in_array($parent_test, $original_results)) {
+    $parent_results = TRUE;
   }
-  catch (Exception $e) {
-    watchdog_exception('Islandora', $e, 'Got an exception searching for parent objects .', array(), WATCHDOG_ERROR);
-    $parent_results = array();
+  else {
+    $parent_results = FALSE;
   }
   return ($parent_results);
 }
