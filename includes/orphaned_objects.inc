@@ -199,9 +199,11 @@ function islandora_get_orphaned_objects() {
     $orphaned_objects = array();
     $already_checked = array();
     $missing_parents = array();
+    $maximum_returned = 100;
     // Check all results for PIDs that don't exist.
     foreach ($results as $result) {
-      if (array_key_exists($collection_field, $result['solr_doc'])) {
+    if (count($orphaned_objects) <= $maximum_returned) {
+      if (array_key_exists($collection_field, $result['solr_doc'])) {    
         foreach ($result['solr_doc'][$collection_field] as $collection) {
           if (($result['PID'] != $root_pid) && ($collection != $root_pid_check)) {
             if (in_array($collection, $missing_parents)) {
@@ -233,6 +235,7 @@ function islandora_get_orphaned_objects() {
           }
         }
       }
+    }
     }
     $results = $orphaned_objects;
   }
