@@ -199,7 +199,7 @@ function islandora_get_orphaned_objects() {
     $orphaned_objects = array();
     $already_checked = array();
     $missing_parents = array();
-    $maximum_returned = 100;
+    $maximum_returned = 50;
     // Check all results for PIDs that don't exist.
     foreach ($results as $result) {
     if (count($orphaned_objects) <= $maximum_returned) {
